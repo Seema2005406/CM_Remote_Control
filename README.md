@@ -17,46 +17,50 @@ This project demonstrates how to integrate the CarMaker simulation environment w
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/yourusername/carmaker-kuksa-integration.git
-   cd carmaker-kuksa-integration
+   git clone https://github.com/Seema2005406/CM_Remote_Control.git
+   cd CM_Remote_Control
+    ```
 Install the required Python packages:
 
-bash
-Copy code
+```bash
 pip install pycarmaker kuksa-client
+```
+
 Ensure CarMaker and KUKSA Data Broker are running:
 
 Start the CarMaker simulation environment.
 Start the KUKSA data broker on the specified IP and port.
-Configuration
+
+## Configuration
 Before running the script, configure the following parameters:
 
 Update the KUKSA server IP and port in the script:
 
-python
-Copy code
+```bash
 KUKSA_DATA_BROKER_IP = '20.79.188.178'  # Replace with your KUKSA server IP
 KUKSA_DATA_BROKER_PORT = 55555  # Default port for KUKSA
+```
+
 Update the CarMaker connection parameters if necessary:
 
-python
-Copy code
+```bash
 carMaker_IP = "localhost"  # Change if CarMaker is on a different machine
 carMaker_Port = 16660  # Default CarMaker port
-Usage
+```
+
+## Usage
 Run the script:
 
-bash
-Copy code
-python carmaker_kuksa_integration.py
-The script will:
+```bash
+python CM_CONTROLLER.py
+```
 
 Connect to the KUKSA data broker and subscribe to relevant signals.
 Connect to the CarMaker simulation environment.
 Continuously read vehicle parameters from KUKSA and write them to CarMaker.
 Monitor the output in the console for the current values of throttle, brake, steering, and other vehicle parameters.
 
-Functionality
+## Functionality
 The script reads the following signals from the KUKSA data broker:
 
 Vehicle throttle position
@@ -67,18 +71,10 @@ Reverse status
 Clutch engagement
 It maps these values to the corresponding parameters in CarMaker to control the vehicle simulation.
 
-Troubleshooting
+## Troubleshooting
 Ensure that both CarMaker and KUKSA are running and that you can access them from the machine running the script.
 Check for any connectivity issues or incorrect IP/port configurations.
 Review the logging output for any error messages or warnings.
-License
-This project is licensed under the MIT License. See the LICENSE file for details.
-
-Acknowledgements
-CarMaker for providing the vehicle simulation environment.
-KUKSA for offering a data broker that enables vehicle data communication.
-markdown
-Copy code
 
 ### Instructions for Use
 1. **Clone and Configure**: Users should clone the repository and update the IP addresses and ports as necessary.
