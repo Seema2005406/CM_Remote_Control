@@ -28,6 +28,6 @@ RUN pip install --no-cache-dir pygame \
     && pip install --no-cache-dir kuksa-client  # Install kuksa-client
 
 # Run the application
-CMD [ "python", "./pub2.py" ]
+CMD [ "python", "./cm_transfer.py" ]
 
 

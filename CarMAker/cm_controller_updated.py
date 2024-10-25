@@ -1,152 +1,117 @@
 import os
 import time
 import logging
-import threading
 from pycarmaker import CarMaker, Quantity  # CarMaker Library
 from kuksa_client.grpc import VSSClient  # Kuksa Library
 
-# Get the KUKSA data broker IP and port
+# Get the KUKSA data broker IP and port from environment variables
 KUKSA_DATA_BROKER_IP = '20.79.188.178'  # Replace with your KUKSA server IP
 KUKSA_DATA_BROKER_PORT = 55555  # Default port for KUKSA
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
 
-# Event to control when writing to CarMaker starts
-simulation_ready_event = threading.Event()
+# Initialize CarMaker
+carMaker_IP = "localhost"  # Change if necessary
+carMaker_Port = 16660  # Default CarMaker port
+try:
+    cm = CarMaker(carMaker_IP, carMaker_Port)
+    cm.connect()
+    print("Connected to CarMaker")
+except Exception as e:
+    print(f"Failed to connect to CarMaker: {e}")
 
-class CarMakerController(threading.Thread):
-    def __init__(self):
-        super().__init__()
-        self.carMaker_IP = "localhost"
-        self.carMaker_Port = 16660
-        self.cm = CarMaker(self.carMaker_IP, self.carMaker_Port)
-        self.is_running = True
+# Subscribe to necessary quantities in CarMaker
+throttle_quantity = Quantity("DM.gas", Quantity.FLOAT)
+brake_quantity = Quantity("DM.brake", Quantity.FLOAT)
+steering_quantity = Quantity("DM.Steer.Ang", Quantity.FLOAT)
+handbrake_quantity = Quantity("DM.Handbrake", Quantity.FLOAT)
+clutch_quantity = Quantity("DM.Clutch", Quantity.FLOAT)
 
-        # Subscribe to CarMaker quantities
-        self.throttle_quantity = Quantity("DM.Gas", Quantity.FLOAT)
-        self.brake_quantity = Quantity("DM.Brake", Quantity.FLOAT)
-        self.steering_quantity = Quantity("DM.Steer.Ang", Quantity.FLOAT)
-        self.clutch_quantity = Quantity("DM.Clutch", Quantity.FLOAT)
-        self.handbrake_quantity = Quantity("DM.Handbrake", Quantity.FLOAT)
-        self.user_out_quantity = Quantity("UserOut_01", Quantity.FLOAT)  # User output quantity
+# Subscribe to quantities
+cm.subscribe(throttle_quantity)
+cm.subscribe(brake_quantity)
+cm.subscribe(steering_quantity)
+cm.subscribe(handbrake_quantity)
+cm.subscribe(clutch_quantity)
 
-        self.cm.connect()
-        self.cm.subscribe(self.throttle_quantity)
-        self.cm.subscribe(self.brake_quantity)
-        self.cm.subscribe(self.steering_quantity)
-        self.cm.subscribe(self.clutch_quantity)
-        self.cm.subscribe(self.handbrake_quantity)
-        self.cm.subscribe(self.user_out_quantity)  # Subscribe to user output
+def clamp(value, min_value, max_value):
+    return max(min(value, max_value), min_value)
 
-    def run(self):
-        # Start CarMaker simulation and wait for it to be ready
-        print(self.cm.send("::Cockpit::Close\r"))
-        print(self.cm.send("::Cockpit::Popup\r"))
-        print(self.cm.send("StartSim\r"))
-        print(self.cm.send("WaitForStatus running\r"))  # Wait until CarMaker simulation is running
+# Initialize ABS activation flag
+abs_is_engaged = False  # This will toggle on the first encounter of ABS.IsEngaged == 1
 
-        simulation_ready_event.set()  # Signal that the simulation is ready for data writing
-        logging.info("CarMaker simulation is running. Ready to write data.")
+def map_kuksa_to_carmaker(updates):
+    """Map the KUKSA signal values to the CarMaker control."""
+    global abs_is_engaged
 
-        while self.is_running:
-            time.sleep(0.2)  # Keep the thread alive
+    # Check ABS signal first
+    signal = updates['Vehicle.ADAS.CruiseControl.IsActive'].value
+    if signal == 1:
+        abs_is_engaged = True
 
-    def write_values(self, throttle, brake, steering, clutch, handbrake, reverse):
-        """Write KUKSA values to CarMaker."""
-        print(self.cm.DVA_write(self.throttle_quantity, throttle))  # Set throttle
-        print(self.cm.DVA_write(self.brake_quantity, brake))        # Set brake
-        print(self.cm.DVA_write(self.steering_quantity, steering))  # Set steering
-        print(self.cm.DVA_write(self.clutch_quantity, clutch))  
-        print(self.cm.DVA_write(self.handbrake_quantity, handbrake))
+    # Only execute DVA_write if ABS has been set to 1 at least once
+    if abs_is_engaged:
+        throttle = updates['Vehicle.OBD.RelativeThrottlePosition'].value
+        brake = updates['Vehicle.Chassis.Brake.PedalPosition'].value
+        steering = updates['Vehicle.Speed'].value
+        handbrake = updates['Vehicle.Chassis.Axle.Row1.Wheel.Right.Brake.PadWear'].value
+        reverse = updates['Vehicle.Chassis.Axle.Row2.Wheel.Left.Brake.PadWear'].value
 
-    def stop(self):
-        self.is_running = False
+        # Clamp throttle to a valid range
+        throttle = clamp(throttle, -1.0, 1.0)
 
-class KuksaReader(threading.Thread):
-    def __init__(self, car_maker_controller):
-        super().__init__()
-        self.car_maker_controller = car_maker_controller
-        self.is_running = True
-        self.should_write = False  # Flag to control writing
-        self.user_out_count = 0  # Counter for UserOut_01 encounters
+        # Send values to CarMaker
+        cm.DVA_write(throttle_quantity, throttle)  # Set throttle
+        cm.DVA_write(brake_quantity, brake)        # Set brake
+        cm.DVA_write(handbrake_quantity, handbrake)  # Set handbrake
+        cm.DVA_write(steering_quantity, steering)  # Set steering
 
-    def run(self):
-        with VSSClient(KUKSA_DATA_BROKER_IP, KUKSA_DATA_BROKER_PORT) as client:
-            # Subscribe to KUKSA signals
-            client.subscribe_current_values([
+        # Log the current state for debugging
+        logging.info(f"Throttle: {throttle}, Brake: {brake}, Steering: {steering}, Handbrake: {handbrake}, Reverse: {reverse}")
+
+def main():
+    with VSSClient(KUKSA_DATA_BROKER_IP, KUKSA_DATA_BROKER_PORT) as client:
+        # Subscribe to the signals published by the G29 controller script
+        client.subscribe_current_values([
+            'Vehicle.OBD.RelativeThrottlePosition',
+            'Vehicle.Chassis.Brake.PedalPosition',
+            'Vehicle.Speed',
+            'Vehicle.Chassis.Axle.Row1.Wheel.Right.Brake.PadWear',
+            'Vehicle.Chassis.Axle.Row2.Wheel.Left.Brake.PadWear',
+            'Vehicle.Powertrain.Transmission.ClutchEngagement',
+            'Vehicle.ADAS.CruiseControl.IsActive',  # ABS signal for control
+        ])
+
+        print("Subscribed to KUKSA signals...")
+
+        while True:
+            # Get the current values for the subscribed signals
+            updates = client.get_current_values([
                 'Vehicle.OBD.RelativeThrottlePosition',
-                'Vehicle.ADAS.CruiseControl.SpeedSet',
+                'Vehicle.Chassis.Brake.PedalPosition',
                 'Vehicle.Speed',
                 'Vehicle.Chassis.Axle.Row1.Wheel.Right.Brake.PadWear',
                 'Vehicle.Chassis.Axle.Row2.Wheel.Left.Brake.PadWear',
                 'Vehicle.Powertrain.Transmission.ClutchEngagement',
+                'Vehicle.ADAS.CruiseControl.IsActive',  # Get ABS engagement status
             ])
-            print("Subscribed to KUKSA signals...")
 
-            # Wait for CarMaker to be ready
-            simulation_ready_event.wait()  # Wait for the CarMaker simulation to be running
-            time.sleep(1)
-            while self.is_running:
-                # Get the current values for the subscribed signals
-                updates = client.get_current_values([
-                    'Vehicle.OBD.RelativeThrottlePosition',
-                    'Vehicle.ADAS.CruiseControl.SpeedSet',
-                    'Vehicle.Speed',
-                    'Vehicle.Chassis.Axle.Row1.Wheel.Right.Brake.PadWear',
-                    'Vehicle.Chassis.Axle.Row2.Wheel.Left.Brake.PadWear',
-                    'Vehicle.Powertrain.Transmission.ClutchEngagement',
-                ])
+            # Map the KUKSA signals to CarMaker control
+            map_kuksa_to_carmaker(updates)
 
-                # Map and send KUKSA signals to CarMaker
-                throttle = updates['Vehicle.OBD.RelativeThrottlePosition'].value
-                brake = updates['Vehicle.ADAS.CruiseControl.SpeedSet'].value
-                steering = updates['Vehicle.Speed'].value
-                clutch = updates['Vehicle.Powertrain.Transmission.ClutchEngagement'].value
-                handbrake = updates['Vehicle.Chassis.Axle.Row1.Wheel.Right.Brake.PadWear'].value
-                reverse = updates['Vehicle.Chassis.Axle.Row2.Wheel.Left.Brake.PadWear'].value
+            # Print the current values for debugging
+            print("Current Values:")
+            print(f"Throttle: {updates['Vehicle.OBD.RelativeThrottlePosition'].value}")
+            print(f"Brake: {updates['Vehicle.Chassis.Brake.PedalPosition'].value}")
+            print(f"Steering: {updates['Vehicle.Speed'].value}")
+            print(f"Handbrake Active: {updates['Vehicle.Chassis.Axle.Row1.Wheel.Right.Brake.PadWear'].value}")
+            print(f"Reverse Active: {updates['Vehicle.Chassis.Axle.Row2.Wheel.Left.Brake.PadWear'].value}")
+            print(f"Input: {updates['Vehicle.ADAS.CruiseControl.IsActive'].value}")
+            print("----------------------------")
 
-                # Check the value of UserOut_01
-                user_out_value = self.car_maker_controller.cm.DVA_read(self.car_maker_controller.user_out_quantity)
-
-                # Check for UserOut_01 encounters
-                if user_out_value == 1.0:
-                    self.user_out_count += 1  # Increment count if 1.0 is encountered
-
-                # Start writing on the first encounter of 1.0
-                if self.user_out_count == 1:
-                    self.should_write = True
-                    logging.info("Writing has started.")
-
-                # Stop writing on the second encounter of 1.0
-                if self.user_out_count == 2:
-                    self.should_write = False
-                    logging.info("Writing has stopped.")
-
-                # Write values if should_write is True
-                if self.should_write:
-                    self.car_maker_controller.write_values(throttle, brake, steering, clutch, handbrake, reverse)
-                    logging.info(f"Throttle: {throttle}, Brake: {brake}, Steering: {steering}, Clutch: {clutch}, Handbrake: {handbrake}, Reverse/Gear: {reverse}")
-
-                time.sleep(0.1)  # Adjust delay for smooth control loop
-
-    def stop(self):
-        self.is_running = False
+            time.sleep(0.1)  # Adjust the delay for a smooth control loop
 
 if __name__ == '__main__':
-    car_maker_controller = CarMakerController()
-    kuksa_reader = KuksaReader(car_maker_controller)
+    main()
 
-    car_maker_controller.start()  # Start CarMaker thread
-    kuksa_reader.start()  # Start KUKSA reader thread
-
-    try:
-        while True:
-            time.sleep(0.1)  # Keep the main thread alive
-    except KeyboardInterrupt:
-        print("\nKeyboardInterrupt caught. Stopping threads...")
-        car_maker_controller.stop()
-        kuksa_reader.stop()
-        car_maker_controller.join()
-        kuksa_reader.join()
-        print("Threads have been stopped.")
