@@ -20,12 +20,6 @@ This project demonstrates how to integrate the CarMaker simulation environment w
    git clone https://github.com/Seema2005406/CM_Remote_Control.git
    cd CM_Remote_Control
     ```
-Install the required Python packages:
-
-```bash
-pip install pycarmaker kuksa-client
-```
-
 Ensure CarMaker and KUKSA Data Broker are running:
 
 Start the CarMaker simulation environment.

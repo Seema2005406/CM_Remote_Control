@@ -12,25 +12,31 @@ KUKSA_DATA_BROKER_PORT = 55555  # Default port for KUKSA
 logging.basicConfig(level=logging.INFO)
 
 # Initialize CarMaker
+
 carMaker_IP = "localhost"  # Change if necessary
 carMaker_Port = 16660  # Default CarMaker port
-cm = CarMaker(carMaker_IP, carMaker_Port)
-cm.connect()
-
+try:
+    cm = CarMaker(carMaker_IP, carMaker_Port)
+    cm.connect()
+    print(f" connect to CarMaker")
+   
+except Exception as e:
+    print(f"Failed to connect to CarMaker: {e}")
+   
 # Subscribe to necessary quantities in CarMaker
-throttle_quantity = Quantity("Vehicle.OBD.RelativeThrottlePosition", Quantity.FLOAT)
-brake_quantity = Quantity("Vehicle.Chassis.Brake.PedalPosition", Quantity.FLOAT)
-steering_quantity = Quantity("Vehicle.Speed", Quantity.FLOAT)
-handbrake_quantity = Quantity("Vehicle.Chassis.Axle.Row1.Wheel.Right.Brake.PadWear", Quantity.FLOAT)
-reverse_quantity = Quantity("Vehicle.Chassis.Axle.Row2.Wheel.Left.Brake.PadWear", Quantity.FLOAT)
-clutch_quantity = Quantity("Vehicle.Powertrain.Transmission.ClutchEngagement", Quantity.FLOAT)
+throttle_quantity = Quantity("DM.gas", Quantity.FLOAT)
+brake_quantity = Quantity("DM.brake", Quantity.FLOAT)
+steering_quantity = Quantity("DM.Steer.Ang", Quantity.FLOAT)
+handbrake_quantity = Quantity("DM.Handbrake", Quantity.FLOAT)
+#reverse_quantity = Quantity("Vehicle.Chassis.Axle.Row2.Wheel.Left.Brake.PadWear", Quantity.FLOAT)
+clutch_quantity = Quantity("DM.Clutch", Quantity.FLOAT)
 
 # Subscribe to quantities
 cm.subscribe(throttle_quantity)
 cm.subscribe(brake_quantity)
 cm.subscribe(steering_quantity)
 cm.subscribe(handbrake_quantity)
-cm.subscribe(reverse_quantity)
+#cm.subscribe(reverse_quantity)
 cm.subscribe(clutch_quantity)
 
 def clamp(value, min_value, max_value):
@@ -51,7 +57,7 @@ def map_kuksa_to_carmaker(updates):
     cm.DVA_write(throttle_quantity, throttle)  # Set throttle
     cm.DVA_write(brake_quantity, brake)        # Set brake
     cm.DVA_write(handbrake_quantity, handbrake)  # Set handbrake
-    cm.DVA_write(reverse_quantity, reverse)    # Set reverse
+   # cm.DVA_write(reverse_quantity, reverse)    # Set reverse
     cm.DVA_write(steering_quantity, steering)  # Set steering
 
     # Log the current state for debugging
